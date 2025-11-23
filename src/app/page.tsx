@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { MapPin, Send, ShieldAlert, Loader2 } from "lucide-react";
+import { MapPin, Send, ShieldAlert, Loader2, FolderOpen, RefreshCw, X, Maximize2 } from "lucide-react";
 import { processGameTurn } from "./actions";
 
 interface LogEntry {
@@ -12,27 +12,34 @@ interface LogEntry {
   isTyping?: boolean;
 }
 
+interface Suspect {
+  name: string;
+  status: string;
+  notes: string;
+}
+
 export default function Home() {
   const [started, setStarted] = useState(false);
   const [input, setInput] = useState("");
-  const [logs, setLogs] = useState<LogEntry[]>([
-    {
-      id: "1",
-      type: "system",
-      text: "CASE FILE #2025-001: THE MIDNIGHT SHADOW\nLocation: 42nd Street Alley\nTime: 23:45\n\nDetective, you've arrived at the scene. The rain is heavy, washing away potential evidence. The body lies near the dumpster.",
-      timestamp: "23:45",
-      isTyping: false,
-    },
-  ]);
+  const [logs, setLogs] = useState<LogEntry[]>([]);
 
-  // Initial placeholder image
+  // Game State
   const [sceneImageUrl, setSceneImageUrl] = useState("https://image.pollinations.ai/prompt/dark%20rainy%20alleyway%20night%20film%20noir%20style%20black%20and%20white%20photography%20high%20contrast%20grainy?width=1024&height=1024&nologo=true&model=flux");
-  const [imageLoading, setImageLoading] = useState(true);
-  const [currentLocation, setCurrentLocation] = useState("42nd Street Alley");
-  const [currentTime, setCurrentTime] = useState("23:45");
+  const [imageLoading, setImageLoading] = useState(false);
+  const [currentLocation, setCurrentLocation] = useState("Unknown");
+  const [currentTime, setCurrentTime] = useState("00:00");
+  const [evidence, setEvidence] = useState<string[]>([]);
+  const [suspects, setSuspects] = useState<Suspect[]>([]);
+  const [gallery, setGallery] = useState<string[]>([]);
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [currentObjective, setCurrentObjective] = useState("SOLVE THE MURDER");
+  const [caseSummary, setCaseSummary] = useState("Investigation started.");
 
   const [isTyping, setIsTyping] = useState(false);
   const [gameOver, setGameOver] = useState(false);
+  const [showDossier, setShowDossier] = useState(false);
+  const [expandedSection, setExpandedSection] = useState<string | null>(null);
+
   const logsEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -42,6 +49,77 @@ export default function Home() {
   useEffect(() => {
     scrollToBottom();
   }, [logs, isTyping]);
+
+  const startGame = async () => {
+    setStarted(true);
+    setIsTyping(true);
+    setLogs([]);
+    setEvidence([]);
+    setSuspects([]);
+    setGallery([]);
+    setGameOver(false);
+    setCurrentObjective("SOLVE THE MURDER");
+    setCaseSummary("Investigation started.");
+
+    // Initial call to AI to generate the case
+    try {
+      const response = await processGameTurn([], "START_GAME");
+
+      const responseId = Date.now().toString();
+      const responseText = response.narrative;
+
+      if (response.location) setCurrentLocation(response.location);
+      if (response.time) setCurrentTime(response.time);
+      if (response.evidence) setEvidence(response.evidence);
+      if (response.suspects) setSuspects(response.suspects);
+      if (response.current_objective) setCurrentObjective(response.current_objective);
+      if (response.case_summary) setCaseSummary(response.case_summary);
+
+      if (response.visual_prompt) {
+        setImageLoading(true);
+        const prompt = encodeURIComponent(`${response.visual_prompt} film noir style, black and white photography, high contrast, grainy`);
+        const seed = Math.floor(Math.random() * 1000000);
+        const newUrl = `https://image.pollinations.ai/prompt/${prompt}?width=1024&height=1024&nologo=true&model=flux&seed=${seed}`;
+        setSceneImageUrl(newUrl);
+        setGallery([newUrl]);
+      }
+
+      setLogs([{
+        id: responseId,
+        type: "system",
+        text: responseText,
+        timestamp: response.time || "00:00",
+        isTyping: false,
+      }]);
+
+      setIsTyping(false);
+
+    } catch (error) {
+      console.error("Error starting game:", error);
+      setIsTyping(false);
+      setLogs([{
+        id: "error",
+        type: "system",
+        text: "Failed to load case files. The archives are empty.",
+        timestamp: "ERROR",
+        isTyping: false
+      }]);
+    }
+  };
+
+  const resetGame = () => {
+    setStarted(false);
+    setLogs([]);
+    setEvidence([]);
+    setSuspects([]);
+    setGallery([]);
+    setGameOver(false);
+    setShowDossier(false);
+    setSelectedImage(null); // Reset selected image
+    setExpandedSection(null);
+    setCurrentObjective("SOLVE THE MURDER");
+    setCaseSummary("Investigation started.");
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -60,7 +138,7 @@ export default function Home() {
     setInput("");
     setIsTyping(true);
 
-    // Prepare history for the AI (simplified)
+    // Prepare history for the AI
     const history = logs.map(l => `${l.type.toUpperCase()}: ${l.text}`);
 
     try {
@@ -72,14 +150,38 @@ export default function Home() {
       // Update State
       if (response.location) setCurrentLocation(response.location);
       if (response.time) setCurrentTime(response.time);
+      if (response.current_objective) setCurrentObjective(response.current_objective);
+      if (response.case_summary) setCaseSummary(response.case_summary);
 
-      // Update Scene Image - FORCE generation even if prompt is weak
+      // Merge Evidence (prevent duplicates)
+      if (response.evidence && response.evidence.length > 0) {
+        setEvidence(prev => Array.from(new Set([...prev, ...response.evidence])));
+      }
+
+      // Merge Suspects (update existing or add new)
+      if (response.suspects && response.suspects.length > 0) {
+        setSuspects(prev => {
+          const newSuspects = [...prev];
+          response.suspects.forEach((s: Suspect) => {
+            const index = newSuspects.findIndex(existing => existing.name === s.name);
+            if (index !== -1) {
+              newSuspects[index] = s;
+            } else {
+              newSuspects.push(s);
+            }
+          });
+          return newSuspects;
+        });
+      }
+
+      // Update Scene Image
       const visualPrompt = response.visual_prompt || "dark noir mystery scene shadows rain";
       setImageLoading(true);
       const prompt = encodeURIComponent(`${visualPrompt} film noir style, black and white photography, high contrast, grainy`);
       const seed = Math.floor(Math.random() * 1000000);
       const newUrl = `https://image.pollinations.ai/prompt/${prompt}?width=1024&height=1024&nologo=true&model=flux&seed=${seed}`;
       setSceneImageUrl(newUrl);
+      setGallery(prev => [newUrl, ...prev]);
 
       if (response.game_over) {
         setGameOver(true);
@@ -113,7 +215,7 @@ export default function Home() {
             return log;
           }));
         }
-      }, 20); // Faster typing
+      }, 20);
 
     } catch (error) {
       console.error("Error processing turn:", error);
@@ -123,13 +225,13 @@ export default function Home() {
 
   if (!started) {
     return (
-      <div className="min-h-screen bg-zinc-950 flex items-center justify-center p-4 cursor-pointer" onClick={() => setStarted(true)}>
+      <div className="min-h-screen bg-zinc-950 flex items-center justify-center p-4 cursor-pointer" onClick={startGame}>
         <div className="text-center space-y-6 animate-in fade-in zoom-in duration-1000">
           <h1 className="text-6xl md:text-9xl font-black text-zinc-100 tracking-tighter flicker" style={{ fontFamily: 'var(--font-special-elite)' }}>
             NOIR
           </h1>
           <p className="text-zinc-500 tracking-[0.5em] text-sm md:text-xl uppercase animate-pulse">
-            Click to Initialize Terminal
+            Click to Open Case File
           </p>
         </div>
       </div>
@@ -150,7 +252,12 @@ export default function Home() {
             <div className="h-4 w-px bg-zinc-700" />
             <span className="text-xs text-zinc-400 tracking-widest">CONFIDENTIAL // EYES ONLY</span>
           </div>
-          <div className="text-xs text-zinc-500 font-bold">V.2.0.0</div>
+          <div className="flex items-center gap-4">
+            <button onClick={resetGame} className="text-xs text-zinc-500 hover:text-red-500 transition-colors flex items-center gap-1 uppercase tracking-wider font-bold">
+              <RefreshCw className="w-3 h-3" /> Reset Case
+            </button>
+            <div className="text-xs text-zinc-500 font-bold">V.2.1.0</div>
+          </div>
         </div>
 
         <div className="flex flex-1 overflow-hidden">
@@ -186,14 +293,14 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="flex-1 p-4">
+            <div className="flex-1 p-4 overflow-y-auto scrollbar-thin scrollbar-thumb-zinc-700 scrollbar-track-transparent">
               <div className="text-xs text-zinc-500 mb-2 uppercase tracking-wider flex items-center gap-2">
                 <ShieldAlert className="w-3 h-3" /> Status
               </div>
               <div className="space-y-4">
                 <div className="bg-zinc-950/50 p-3 border border-zinc-800">
                   <div className="text-[10px] text-zinc-500 mb-1">CURRENT OBJECTIVE</div>
-                  <div className="text-sm text-zinc-300 font-bold">{gameOver ? "REPORT TO PRECINCT" : "SOLVE THE MURDER"}</div>
+                  <div className="text-sm text-zinc-300 font-bold">{gameOver ? "REPORT TO PRECINCT" : currentObjective}</div>
                 </div>
                 <div className="bg-zinc-950/50 p-3 border border-zinc-800">
                   <div className="text-[10px] text-zinc-500 mb-1">LOCATION</div>
@@ -201,20 +308,244 @@ export default function Home() {
                   <div className="text-[10px] text-zinc-500 mt-2 mb-1">TIME</div>
                   <div className="text-sm text-zinc-300 font-bold">{currentTime}</div>
                 </div>
-                <div className="bg-zinc-950/50 p-3 border border-zinc-800">
-                  <div className="text-[10px] text-zinc-500 mb-1">SUSPECTS</div>
-                  <ul className="text-xs text-zinc-400 space-y-1">
-                    <li>- Velma (Lover)</li>
-                    <li>- Big Sal (Mob)</li>
-                    <li>- Officer O&apos;Malley</li>
-                  </ul>
-                </div>
+
+                <button
+                  onClick={() => setShowDossier(true)}
+                  className="w-full bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-600 p-3 flex items-center justify-center gap-2 transition-all group"
+                >
+                  <FolderOpen className="w-4 h-4 group-hover:text-amber-500 transition-colors" />
+                  <span className="text-xs font-bold uppercase tracking-widest">Open Case Dossier</span>
+                </button>
               </div>
             </div>
           </div>
 
           {/* Main Content */}
           <div className="flex-1 flex flex-col bg-zinc-950/80 relative">
+
+            {/* Dossier Modal */}
+            {showDossier && (
+              <div className="absolute inset-0 z-40 bg-black/90 backdrop-blur-md p-8 animate-in fade-in zoom-in-95 duration-300 flex flex-col">
+                <div className="flex items-center justify-between mb-6 border-b border-zinc-700 pb-4">
+                  <h2 className="text-2xl font-black text-amber-600 tracking-tighter flex items-center gap-3" style={{ fontFamily: 'var(--font-special-elite)' }}>
+                    <FolderOpen className="w-6 h-6" /> CASE DOSSIER
+                  </h2>
+                  <button onClick={() => setShowDossier(false)} className="text-zinc-500 hover:text-zinc-200">
+                    <X className="w-6 h-6" />
+                  </button>
+                </div>
+
+                <div className="flex-1 overflow-y-auto grid grid-cols-1 md:grid-cols-2 gap-6 pb-6">
+                  {/* Case Summary Section */}
+                  <div className="bg-zinc-900/50 border border-zinc-800 p-4 relative overflow-hidden md:col-span-2 flex flex-col max-h-64">
+                    <div className="absolute top-0 left-0 w-full h-1 bg-zinc-500/50" />
+                    <div className="flex items-center justify-between mb-4 flex-shrink-0">
+                      <h3 className="text-zinc-400 font-bold tracking-widest text-xs uppercase">Investigation Log</h3>
+                      <button onClick={() => setExpandedSection('log')} className="text-zinc-600 hover:text-zinc-300 transition-colors">
+                        <Maximize2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                    <div className="overflow-y-auto scrollbar-thin scrollbar-thumb-zinc-700 scrollbar-track-transparent pr-2">
+                      <p className="text-sm text-zinc-300 font-mono leading-relaxed whitespace-pre-wrap">
+                        {caseSummary}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Evidence Section */}
+                  <div className="bg-zinc-900/50 border border-zinc-800 p-4 relative overflow-hidden flex flex-col max-h-64">
+                    <div className="absolute top-0 left-0 w-full h-1 bg-amber-900/50" />
+                    <div className="flex items-center justify-between mb-4 flex-shrink-0">
+                      <h3 className="text-zinc-400 font-bold tracking-widest text-xs uppercase">Evidence Collected</h3>
+                      <button onClick={() => setExpandedSection('evidence')} className="text-zinc-600 hover:text-zinc-300 transition-colors">
+                        <Maximize2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                    <div className="overflow-y-auto scrollbar-thin scrollbar-thumb-zinc-700 scrollbar-track-transparent pr-2">
+                      {evidence.length === 0 ? (
+                        <p className="text-zinc-600 italic text-sm">No evidence found yet.</p>
+                      ) : (
+                        <ul className="space-y-2">
+                          {evidence.map((item, idx) => (
+                            <li key={idx} className="bg-black/40 border border-zinc-800 p-2 text-sm text-zinc-300 font-mono flex items-start gap-2">
+                              <span className="text-amber-700 mt-0.5">▪</span> {item}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Suspects Section */}
+                  <div className="bg-zinc-900/50 border border-zinc-800 p-4 relative overflow-hidden flex flex-col max-h-64">
+                    <div className="absolute top-0 left-0 w-full h-1 bg-red-900/50" />
+                    <div className="flex items-center justify-between mb-4 flex-shrink-0">
+                      <h3 className="text-zinc-400 font-bold tracking-widest text-xs uppercase">Suspects</h3>
+                      <button onClick={() => setExpandedSection('suspects')} className="text-zinc-600 hover:text-zinc-300 transition-colors">
+                        <Maximize2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                    <div className="overflow-y-auto scrollbar-thin scrollbar-thumb-zinc-700 scrollbar-track-transparent pr-2">
+                      {suspects.length === 0 ? (
+                        <p className="text-zinc-600 italic text-sm">No suspects identified.</p>
+                      ) : (
+                        <div className="grid gap-4">
+                          {suspects.map((suspect, idx) => (
+                            <div key={idx} className="bg-black/40 border border-zinc-800 p-3 relative group hover:border-zinc-600 transition-colors">
+                              <div className="absolute -top-2 -right-2 w-4 h-4 bg-zinc-800 rounded-full border border-zinc-600" /> {/* Pin */}
+                              <div className="font-bold text-zinc-200 mb-1">{suspect.name}</div>
+                              <div className="text-[10px] font-bold uppercase tracking-wider mb-2 text-zinc-500">
+                                Status: <span className={suspect.status.toLowerCase().includes('dead') ? 'text-red-500' : 'text-green-500'}>{suspect.status}</span>
+                              </div>
+                              <p className="text-xs text-zinc-400 leading-relaxed border-t border-zinc-800 pt-2 mt-2">
+                                {suspect.notes}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Crime Scene Photos Section */}
+                  <div className="bg-zinc-900/50 border border-zinc-800 p-4 relative overflow-hidden md:col-span-2 flex flex-col max-h-96">
+                    <div className="absolute top-0 left-0 w-full h-1 bg-zinc-700/50" />
+                    <div className="flex items-center justify-between mb-4 flex-shrink-0">
+                      <h3 className="text-zinc-400 font-bold tracking-widest text-xs uppercase">Crime Scene Photos</h3>
+                      <button onClick={() => setExpandedSection('photos')} className="text-zinc-600 hover:text-zinc-300 transition-colors">
+                        <Maximize2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                    <div className="overflow-y-auto scrollbar-thin scrollbar-thumb-zinc-700 scrollbar-track-transparent pr-2">
+                      {gallery.length === 0 ? (
+                        <p className="text-zinc-600 italic text-sm">No photos on file.</p>
+                      ) : (
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                          {gallery.map((url, idx) => (
+                            <div
+                              key={idx}
+                              className="relative aspect-square border border-zinc-800 bg-black group overflow-hidden cursor-pointer"
+                              onClick={() => setSelectedImage(url)}
+                            >
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img
+                                src={url}
+                                alt={`Evidence #${idx + 1}`}
+                                className="w-full h-full object-cover grayscale contrast-125 hover:grayscale-0 transition-all duration-500"
+                              />
+                              <div className="absolute bottom-0 left-0 right-0 bg-black/70 text-[10px] text-zinc-400 p-1 text-center font-mono">
+                                IMG_00{gallery.length - idx}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="text-center text-zinc-600 text-[10px] uppercase tracking-[0.3em]">
+                  Confidential Investigation Material
+                </div>
+              </div>
+            )}
+
+            {/* Expanded Section Modal */}
+            {expandedSection && (
+              <div className="absolute inset-0 z-50 bg-black/95 backdrop-blur-md p-8 animate-in fade-in zoom-in-95 duration-300 flex flex-col">
+                <div className="flex items-center justify-between mb-6 border-b border-zinc-700 pb-4">
+                  <h2 className="text-2xl font-black text-zinc-200 tracking-tighter flex items-center gap-3 uppercase">
+                    {expandedSection === 'log' && 'Investigation Log'}
+                    {expandedSection === 'evidence' && 'Evidence Collected'}
+                    {expandedSection === 'suspects' && 'Suspects'}
+                    {expandedSection === 'photos' && 'Crime Scene Photos'}
+                  </h2>
+                  <button onClick={() => setExpandedSection(null)} className="text-zinc-500 hover:text-zinc-200">
+                    <X className="w-6 h-6" />
+                  </button>
+                </div>
+
+                <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-zinc-700 scrollbar-track-transparent p-4 bg-zinc-900/30 border border-zinc-800">
+                  {expandedSection === 'log' && (
+                    <p className="text-base text-zinc-300 font-mono leading-relaxed whitespace-pre-wrap max-w-4xl mx-auto">
+                      {caseSummary}
+                    </p>
+                  )}
+
+                  {expandedSection === 'evidence' && (
+                    <ul className="space-y-4 max-w-4xl mx-auto">
+                      {evidence.map((item, idx) => (
+                        <li key={idx} className="bg-black/40 border border-zinc-800 p-4 text-base text-zinc-300 font-mono flex items-start gap-3">
+                          <span className="text-amber-700 mt-1">▪</span> {item}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+
+                  {expandedSection === 'suspects' && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 max-w-6xl mx-auto">
+                      {suspects.map((suspect, idx) => (
+                        <div key={idx} className="bg-black/40 border border-zinc-800 p-6 relative group hover:border-zinc-600 transition-colors">
+                          <div className="absolute -top-3 -right-3 w-6 h-6 bg-zinc-800 rounded-full border border-zinc-600" />
+                          <div className="font-bold text-xl text-zinc-200 mb-2">{suspect.name}</div>
+                          <div className="text-xs font-bold uppercase tracking-wider mb-4 text-zinc-500">
+                            Status: <span className={suspect.status.toLowerCase().includes('dead') ? 'text-red-500' : 'text-green-500'}>{suspect.status}</span>
+                          </div>
+                          <p className="text-sm text-zinc-400 leading-relaxed border-t border-zinc-800 pt-4 mt-2">
+                            {suspect.notes}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {expandedSection === 'photos' && (
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+                      {gallery.map((url, idx) => (
+                        <div
+                          key={idx}
+                          className="relative aspect-square border border-zinc-800 bg-black group overflow-hidden cursor-pointer"
+                          onClick={() => setSelectedImage(url)}
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={url}
+                            alt={`Evidence #${idx + 1}`}
+                            className="w-full h-full object-cover grayscale contrast-125 hover:grayscale-0 transition-all duration-500"
+                          />
+                          <div className="absolute bottom-0 left-0 right-0 bg-black/70 text-xs text-zinc-400 p-2 text-center font-mono">
+                            IMG_00{gallery.length - idx}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Image Modal */}
+            {selectedImage && (
+              <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/95 backdrop-blur-md p-4 animate-in fade-in duration-300" onClick={() => setSelectedImage(null)}>
+                <div className="relative max-w-4xl max-h-full p-1 border-2 border-zinc-800 bg-zinc-950 shadow-2xl">
+                  <button
+                    onClick={() => setSelectedImage(null)}
+                    className="absolute -top-10 right-0 text-zinc-400 hover:text-white transition-colors"
+                  >
+                    <X className="w-8 h-8" />
+                  </button>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={selectedImage}
+                    alt="Evidence Enlarged"
+                    className="max-w-full max-h-[85vh] object-contain grayscale contrast-125"
+                  />
+                  <div className="absolute bottom-4 left-4 right-4 text-center">
+                    <span className="bg-black/80 text-zinc-300 px-3 py-1 text-xs font-mono border border-zinc-700">EVIDENCE EXHIBIT #{gallery.indexOf(selectedImage) !== -1 ? gallery.length - gallery.indexOf(selectedImage) : 'UNKNOWN'}</span>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Game Over Overlay */}
             {gameOver && (
