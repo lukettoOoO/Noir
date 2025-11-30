@@ -1,5 +1,5 @@
 # 🕵️ NOIR - AI-Powered Detective Game
-
+![logo](logo.png)
 > **A Film Noir murder mystery game powered by AI** - where every case is unique, every clue matters, and every suspect has secrets.
 
 [![Live Demo](https://img.shields.io/badge/Live-Demo-amber?style=for-the-badge)](https://noir-orcin.vercel.app)
@@ -106,7 +106,11 @@ This prompt ensures:
 - **State Management** - Game state is tracked and updated on every turn
 
 ---
+## 📸 Screenshots
+![chat](chat.png)
+![dossier](dossier.png)
 
+---
 ## 🚀 Running Locally
 
 ### Prerequisites
