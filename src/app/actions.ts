@@ -37,15 +37,16 @@ Your Rules:
    - **Investigation**: If the player asks to 'look' at something, describe it and update the 'visual_prompt'.
    - **Evidence**: If the player finds a clue, add it to the "evidence" array.
    - **Suspects**: As the player meets or learns about suspects, add/update them in the "suspects" array.
-   - **Objective**: Update 'current_objective' to be a suggestive, noir-style hint (e.g., "The bartender knows more than he's saying," or "Find out where the gun came from"). Do NOT be too explicit.
-   - **Summary**: Update 'case_summary' with a concise, running log of key events and discoveries.
-   - **End**: If the player accuses the correct suspect with evidence, set 'game_over' to true.
+   - **Suspect Status**: You are FREE to kill off suspects if the investigation drags on or if they get too close to the truth. Change their status to "dead" and describe the scene.
+   - **Objective**: Update 'current_objective' to be a suggestive, noir-style hint.
+   - **Summary**: Update 'case_summary' with a concise, running log of key events.
+   - **End**: The game MUST end. If the player accuses the correct suspect with evidence, set 'game_over' to true. If the player fails or dies, set 'game_over' to true.
 
 6. **Visuals**: ALWAYS provide a 'visual_prompt'. It must describe the current scene vividly for an image generator.
 
 7. **Context**: ALWAYS include 'location' and 'time' in the output. Update them as the story progresses.
 
-Keep the mystery solvable but not obvious.
+Keep the mystery solvable but not obvious. Raise the stakes.
 `;
 
 export async function processGameTurn(history: string[], userInput: string) {
@@ -133,51 +134,94 @@ export async function saveGame(caseState: any) {
     // We should probably use `create` if no ID, or `update` if ID exists.
     // Or just `upsert` if we have an ID.
     // I'll check if `caseState.id` exists.
+    console.log("Starting saveGame...", { caseId: caseState.id, userId: (await auth()).userId });
+    const { userId } = await auth();
+    if (!userId) {
+        console.error("saveGame: No userId found.");
+        return null;
+    }
 
-    // Wait, the user plan says: "Use prisma.case.upsert".
-    // This implies we should have an ID.
-    // I'll assume the frontend will pass the ID or it's part of the state.
-    // If not, I'll generate one and return it?
-    // The `processGameTurn` returns a JSON. I should probably inject the ID there or handle it.
-    // For now, I'll try to find an ID in `caseState` or create a new case if missing.
+    try {
+        const user = await currentUser();
+        if (!user) {
+            console.error("saveGame: No currentUser found.");
+            return null;
+        }
 
-    let caseId = caseState.id;
+        const email = user.emailAddresses[0]?.emailAddress;
+        console.log("saveGame: Found user", { userId, email });
 
-    if (caseId) {
-        await prisma.case.upsert({
-            where: { id: caseId },
-            update: {
-                state: caseState,
-                status: caseState.game_over ? "solved" : "active",
-            },
+        // Ensure user exists in DB
+        await prisma.user.upsert({
+            where: { id: userId },
+            update: { email: email },
             create: {
-                id: caseId,
-                userId: user.id,
-                state: caseState,
-                status: caseState.game_over ? "solved" : "active",
+                id: userId,
+                email: email,
             },
         });
-    } else {
-        // Create new case
-        const newCase = await prisma.case.create({
-            data: {
-                userId: user.id,
-                state: caseState,
-                status: caseState.game_over ? "solved" : "active",
-            }
-        });
-        return newCase.id; // Return ID so frontend can track it
+
+        let caseId = caseState.id;
+
+        // Generate a title from the summary or objective if available, or use a default
+        // Generate a title from the summary or objective if available, or use a default
+        let title = caseState.title || "Untitled Case";
+        const summary = caseState.caseSummary || caseState.case_summary;
+
+        if (!caseState.title && summary) {
+            // Take the first sentence or first 50 chars of the summary
+            title = summary.split('.')[0].substring(0, 50) + "...";
+        }
+
+        if (caseId) {
+            console.log("saveGame: Updating existing case", caseId);
+            await prisma.case.update({
+                where: { id: caseId },
+                data: {
+                    state: caseState as any,
+                    status: (caseState.gameOver || caseState.game_over) ? "solved" : "active",
+                    title: title,
+                },
+            });
+        } else {
+            console.log("saveGame: Creating new case");
+            const newCase = await prisma.case.create({
+                data: {
+                    userId: userId,
+                    state: caseState as any,
+                    status: "active",
+                    title: title,
+                },
+            });
+            caseId = newCase.id;
+        }
+
+        console.log("saveGame: Successfully saved case", caseId);
+        return caseId;
+    } catch (error) {
+        console.error("Failed to save game:", error);
+        throw error;
     }
 }
 
 export async function getMyCases() {
+    console.log("Starting getMyCases...");
     const { userId } = await auth();
+    console.log("getMyCases: userId", userId);
+
     if (!userId) return [];
 
-    return await prisma.case.findMany({
-        where: { userId },
-        orderBy: { updatedAt: "desc" },
-    });
+    try {
+        const cases = await prisma.case.findMany({
+            where: { userId: userId },
+            orderBy: { updatedAt: 'desc' },
+        });
+        console.log("getMyCases: Found cases", cases.length);
+        return cases;
+    } catch (error) {
+        console.error("getMyCases: Error fetching cases", error);
+        return [];
+    }
 }
 
 export async function getCase(caseId: string) {
@@ -187,4 +231,22 @@ export async function getCase(caseId: string) {
     return await prisma.case.findUnique({
         where: { id: caseId, userId },
     });
+}
+
+export async function deleteCase(caseId: string) {
+    const { userId } = await auth();
+    if (!userId) return { success: false, error: "Unauthorized" };
+
+    try {
+        await prisma.case.delete({
+            where: {
+                id: caseId,
+                userId: userId, // Ensure user owns the case
+            },
+        });
+        return { success: true };
+    } catch (error) {
+        console.error("Failed to delete case:", error);
+        return { success: false, error: "Failed to delete case" };
+    }
 }
