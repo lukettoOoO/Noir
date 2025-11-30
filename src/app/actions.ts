@@ -95,3 +95,96 @@ export async function processGameTurn(history: string[], userInput: string) {
         };
     }
 }
+
+import { auth, currentUser } from "@clerk/nextjs/server";
+import { prisma } from "@/lib/prisma";
+
+export async function saveGame(caseState: any) {
+    const user = await currentUser();
+    if (!user) return;
+
+    await prisma.user.upsert({
+        where: { id: user.id },
+        update: {},
+        create: {
+            id: user.id,
+            email: user.emailAddresses[0]?.emailAddress || "unknown",
+        },
+    });
+
+    // We use the case ID from the state if it exists, otherwise we create a new one?
+    // The user plan says: "Use prisma.case.upsert to save the game state (store the entire JSON object in the state field)."
+    // But how do we know the case ID?
+    // If the game state doesn't have an ID, we might need to generate one or rely on the DB.
+    // But upsert needs a unique identifier.
+    // If `caseState` has an `id`, we use it. If not, we might be creating a new case every time?
+    // The plan says: "Case: (id String @id @default(cuid()) ...)"
+    // And "Use prisma.case.upsert".
+    // If we don't have an ID, we can't upsert easily unless we use a different unique constraint.
+    // But `id` is the only unique field usually.
+    // Maybe we should pass the caseId separately or check if it's in the state.
+    // For now, I'll assume `caseState` might have an ID or we create a new one.
+    // Actually, if it's a new game, we create. If existing, we update.
+    // But `saveGame` is called automatically.
+    // Let's assume the frontend tracks the `caseId`.
+    // If `caseState` doesn't have an ID, we create.
+    // But `upsert` requires a `where` clause.
+    // If we don't have an ID, we can't use `upsert` on ID.
+    // We should probably use `create` if no ID, or `update` if ID exists.
+    // Or just `upsert` if we have an ID.
+    // I'll check if `caseState.id` exists.
+
+    // Wait, the user plan says: "Use prisma.case.upsert".
+    // This implies we should have an ID.
+    // I'll assume the frontend will pass the ID or it's part of the state.
+    // If not, I'll generate one and return it?
+    // The `processGameTurn` returns a JSON. I should probably inject the ID there or handle it.
+    // For now, I'll try to find an ID in `caseState` or create a new case if missing.
+
+    let caseId = caseState.id;
+
+    if (caseId) {
+        await prisma.case.upsert({
+            where: { id: caseId },
+            update: {
+                state: caseState,
+                status: caseState.game_over ? "solved" : "active",
+            },
+            create: {
+                id: caseId,
+                userId: user.id,
+                state: caseState,
+                status: caseState.game_over ? "solved" : "active",
+            },
+        });
+    } else {
+        // Create new case
+        const newCase = await prisma.case.create({
+            data: {
+                userId: user.id,
+                state: caseState,
+                status: caseState.game_over ? "solved" : "active",
+            }
+        });
+        return newCase.id; // Return ID so frontend can track it
+    }
+}
+
+export async function getMyCases() {
+    const { userId } = await auth();
+    if (!userId) return [];
+
+    return await prisma.case.findMany({
+        where: { userId },
+        orderBy: { updatedAt: "desc" },
+    });
+}
+
+export async function getCase(caseId: string) {
+    const { userId } = await auth();
+    if (!userId) return null;
+
+    return await prisma.case.findUnique({
+        where: { id: caseId, userId },
+    });
+}

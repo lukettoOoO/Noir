@@ -13,19 +13,25 @@ export const metadata: Metadata = {
   description: "A text-based murder mystery.",
 };
 
+import { ClerkProvider } from "@clerk/nextjs";
+
+// ... imports
+
 export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
-      <body
-        className={`${specialElite.variable} antialiased`}
-        suppressHydrationWarning
-      >
-        {children}
-      </body>
-    </html>
+    <ClerkProvider>
+      <html lang="en" suppressHydrationWarning>
+        <body
+          className={`${specialElite.variable} antialiased`}
+          suppressHydrationWarning
+        >
+          {children}
+        </body>
+      </html>
+    </ClerkProvider>
   );
 }

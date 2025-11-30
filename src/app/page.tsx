@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { MapPin, Send, ShieldAlert, Loader2, FolderOpen, RefreshCw, X, Maximize2 } from "lucide-react";
-import { processGameTurn } from "./actions";
+import { MapPin, Send, ShieldAlert, Loader2, FolderOpen, RefreshCw, X, Maximize2, Save } from "lucide-react";
+import { processGameTurn, saveGame, getCase } from "./actions";
+import { useSearchParams, useRouter } from "next/navigation";
 
 interface LogEntry {
   id: string;
@@ -39,6 +40,72 @@ export default function Home() {
   const [gameOver, setGameOver] = useState(false);
   const [showDossier, setShowDossier] = useState(false);
   const [expandedSection, setExpandedSection] = useState<string | null>(null);
+  const [caseId, setCaseId] = useState<string | null>(null);
+
+  const searchParams = useSearchParams();
+  const router = useRouter();
+
+  useEffect(() => {
+    const id = searchParams.get("caseId");
+    if (id && !started) {
+      loadGame(id);
+    }
+  }, [searchParams]);
+
+  const loadGame = async (id: string) => {
+    try {
+      const game = await getCase(id);
+      if (game && game.state) {
+        const state = game.state as any;
+        setCaseId(id);
+        setLogs(state.logs || []);
+        setEvidence(state.evidence || []);
+        setSuspects(state.suspects || []);
+        setGallery(state.gallery || []);
+        setCurrentLocation(state.currentLocation || "Unknown");
+        setCurrentTime(state.currentTime || "00:00");
+        setCurrentObjective(state.currentObjective || "SOLVE THE MURDER");
+        setCaseSummary(state.caseSummary || "Investigation started.");
+        setGameOver(state.gameOver || false);
+        setSceneImageUrl(state.sceneImageUrl || "https://image.pollinations.ai/prompt/dark%20rainy%20alleyway%20night%20film%20noir%20style%20black%20and%20white%20photography%20high%20contrast%20grainy?width=1024&height=1024&nologo=true&model=flux");
+        setStarted(true);
+      }
+    } catch (error) {
+      console.error("Failed to load case:", error);
+    }
+  };
+
+  const saveCurrentGame = async (overrideState?: any) => {
+    const state = {
+      id: caseId,
+      logs: overrideState?.logs || logs,
+      evidence: overrideState?.evidence || evidence,
+      suspects: overrideState?.suspects || suspects,
+      gallery: overrideState?.gallery || gallery,
+      currentLocation: overrideState?.currentLocation || currentLocation,
+      currentTime: overrideState?.currentTime || currentTime,
+      currentObjective: overrideState?.currentObjective || currentObjective,
+      caseSummary: overrideState?.caseSummary || caseSummary,
+      gameOver: overrideState?.gameOver || gameOver,
+      sceneImageUrl: overrideState?.sceneImageUrl || sceneImageUrl
+    };
+
+    // If we have a caseId, include it in the saved state so the backend knows
+    if (caseId) {
+      (state as any).id = caseId;
+    }
+
+    try {
+      const savedId = await saveGame(state);
+      if (savedId && !caseId) {
+        setCaseId(savedId);
+        // Optionally update URL without reload
+        window.history.replaceState(null, "", `/?caseId=${savedId}`);
+      }
+    } catch (error) {
+      console.error("Failed to save game:", error);
+    }
+  };
 
   const logsEndRef = useRef<HTMLDivElement>(null);
 
@@ -223,6 +290,25 @@ export default function Home() {
     }
   };
 
+  // Auto-save when key state changes (debounced or after specific events)
+  // For simplicity, we'll call saveCurrentGame inside processGameTurn or use an effect
+  // But processGameTurn is async and updates state.
+  // Let's use an effect that triggers save when logs change (if started and not typing)
+  useEffect(() => {
+    if (started && !isTyping && logs.length > 0) {
+      // Small delay to ensure state is updated
+      const timeout = setTimeout(() => {
+        saveCurrentGame();
+      }, 1000);
+      return () => clearTimeout(timeout);
+    }
+  }, [logs, isTyping, started]);
+
+  const handleSaveAndQuit = async () => {
+    await saveCurrentGame();
+    router.push("/dashboard");
+  };
+
   if (!started) {
     return (
       <div className="min-h-screen bg-zinc-950 flex items-center justify-center p-4 cursor-pointer" onClick={startGame}>
@@ -256,7 +342,10 @@ export default function Home() {
             <button onClick={resetGame} className="text-xs text-zinc-500 hover:text-red-500 transition-colors flex items-center gap-1 uppercase tracking-wider font-bold">
               <RefreshCw className="w-3 h-3" /> Reset Case
             </button>
-            <div className="text-xs text-zinc-500 font-bold">V.2.1.0</div>
+            <button onClick={handleSaveAndQuit} className="text-xs text-zinc-500 hover:text-amber-500 transition-colors flex items-center gap-1 uppercase tracking-wider font-bold ml-4">
+              <Save className="w-3 h-3" /> Save & Quit
+            </button>
+            <div className="text-xs text-zinc-500 font-bold ml-4">V.2.1.0</div>
           </div>
         </div>
 
