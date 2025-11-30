@@ -282,6 +282,7 @@ export default function Home() {
                     alt="Crime Scene"
                     className={`w-full h-full object-cover transition-opacity duration-700 ${imageLoading ? 'opacity-50' : 'opacity-90'}`}
                     onLoad={() => setImageLoading(false)}
+                    onError={() => setImageLoading(false)}
                   />
                   <div className="absolute inset-0 bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.25)_50%),linear-gradient(90deg,rgba(255,0,0,0.06),rgba(0,255,0,0.02),rgba(0,0,255,0.06))] bg-[length:100%_2px,3px_100%] pointer-events-none opacity-50" />
                 </div>
@@ -432,6 +433,9 @@ export default function Home() {
                                 src={url}
                                 alt={`Evidence #${idx + 1}`}
                                 className="w-full h-full object-cover grayscale contrast-125 hover:grayscale-0 transition-all duration-500"
+                                onError={(e) => {
+                                  (e.target as HTMLImageElement).src = "https://placehold.co/1024x1024/1a1a1a/333333?text=IMAGE+CORRUPTED";
+                                }}
                               />
                               <div className="absolute bottom-0 left-0 right-0 bg-black/70 text-[10px] text-zinc-400 p-1 text-center font-mono">
                                 IMG_00{gallery.length - idx}
@@ -512,6 +516,9 @@ export default function Home() {
                             src={url}
                             alt={`Evidence #${idx + 1}`}
                             className="w-full h-full object-cover grayscale contrast-125 hover:grayscale-0 transition-all duration-500"
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).src = "https://placehold.co/1024x1024/1a1a1a/333333?text=IMAGE+CORRUPTED";
+                            }}
                           />
                           <div className="absolute bottom-0 left-0 right-0 bg-black/70 text-xs text-zinc-400 p-2 text-center font-mono">
                             IMG_00{gallery.length - idx}
