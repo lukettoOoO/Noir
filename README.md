@@ -6,6 +6,7 @@
 [![Next.js](https://img.shields.io/badge/Next.js-16.0-black?style=for-the-badge&logo=next.js)](https://nextjs.org/)
 [![Deployed on Vercel](https://img.shields.io/badge/Vercel-Deployed-black?style=for-the-badge&logo=vercel)](https://vercel.com)
 
+https://noir-orcin.vercel.app
 ---
 
 ## 📚 Course Context
@@ -103,12 +104,6 @@ This prompt ensures:
 - **Immersion** - Noir-style narration with short, punchy sentences
 - **Gameplay Balance** - AI can dynamically adjust difficulty
 - **State Management** - Game state is tracked and updated on every turn
-
----
-
-## 📸 Screenshots
-
-*[Future: Add screenshots of dashboard, game interface, and Clerk auth UI]*
 
 ---
 
