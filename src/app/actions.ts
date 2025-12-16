@@ -52,7 +52,7 @@ Keep the mystery solvable but not obvious. Raise the stakes.
 export async function processGameTurn(history: string[], userInput: string) {
     try {
         const model = genAI.getGenerativeModel({
-            model: "gemini-2.5-flash",
+            model: "gemini-1.5-flash",
             generationConfig: { responseMimeType: "application/json" }
         });
 
