@@ -81,11 +81,37 @@ export async function processGameTurn(history: string[], userInput: string) {
     Respond in JSON.
     `;
 
-        const result = await chat.sendMessage(message);
-        const response = result.response;
-        const text = response.text();
+        // Retry logic with exponential backoff
+        let retries = 0;
+        const maxRetries = 3;
+        let lastError;
 
-        return JSON.parse(text);
+        while (retries < maxRetries) {
+            try {
+                const result = await chat.sendMessage(message);
+                const response = result.response;
+                const text = response.text();
+                return JSON.parse(text);
+            } catch (error: any) {
+                lastError = error;
+                console.warn(`Gemini API attempt ${retries + 1} failed:`, error.message);
+
+                // Check if it's a 503 or 429 (Service Unavailable or Too Many Requests)
+                if (error.message?.includes("503") || error.message?.includes("429")) {
+                    retries++;
+                    if (retries < maxRetries) {
+                        const delay = Math.pow(2, retries) * 1000; // 2s, 4s, 8s
+                        console.log(`Retrying in ${delay}ms...`);
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                        continue;
+                    }
+                }
+                // If it's not a retryable error or we ran out of retries, break
+                break;
+            }
+        }
+
+        throw lastError;
 
     } catch (error) {
         console.error("Gemini API Error:", error);
