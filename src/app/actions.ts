@@ -52,7 +52,7 @@ Keep the mystery solvable but not obvious. Raise the stakes.
 export async function processGameTurn(history: string[], userInput: string) {
     try {
         const model = genAI.getGenerativeModel({
-            model: "gemini-2.0-flash",
+            model: "gemini-flash-latest",
             generationConfig: { responseMimeType: "application/json" }
         });
 
@@ -83,7 +83,7 @@ export async function processGameTurn(history: string[], userInput: string) {
 
         // Retry logic with exponential backoff
         let retries = 0;
-        const maxRetries = 3;
+        const maxRetries = 5;
         let lastError;
 
         while (retries < maxRetries) {
