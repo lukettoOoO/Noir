@@ -90,7 +90,7 @@ export async function processGameTurn(history: string[], userInput: string) {
     } catch (error) {
         console.error("Gemini API Error:", error);
         return {
-            narrative: "The connection to the precinct is fuzzy... I can't make out what you're saying, Detective. (System Error: Check API Key)",
+            narrative: `The connection to the precinct is fuzzy... I can't make out what you're saying, Detective. (System Error: ${error instanceof Error ? error.message : String(error)})`,
             visual_prompt: "A static-filled screen with a disconnect symbol.",
             game_over: false
         };
