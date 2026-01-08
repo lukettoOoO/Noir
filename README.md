@@ -143,6 +143,7 @@ This prompt ensures:
    NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL=/
    NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL=/game
    PRISMA_DATABASE_URL=your_postgresql_connection_string
+   NEXT_PUBLIC_POLLINATIONS_API_KEY=your_key_from_enter.pollinations.ai
    ```
 
 4. **Set up the database:**

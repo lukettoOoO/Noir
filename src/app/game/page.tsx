@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, Suspense } from "react";
 import { MapPin, Send, ShieldAlert, Loader2, FolderOpen, RefreshCw, X, Maximize2, Save } from "lucide-react";
 import { processGameTurn, saveGame, getCase } from "../actions";
+import { STORIES, Story } from "../stories";
 import { useSearchParams, useRouter } from "next/navigation";
 
 interface LogEntry {
@@ -25,7 +26,7 @@ function GameContent() {
   const [logs, setLogs] = useState<LogEntry[]>([]);
 
   // Game State
-  const [sceneImageUrl, setSceneImageUrl] = useState("https://image.pollinations.ai/prompt/dark%20rainy%20alleyway%20night%20film%20noir%20style%20black%20and%20white%20photography%20high%20contrast%20grainy?width=1024&height=1024&nologo=true&model=flux");
+  const [sceneImageUrl, setSceneImageUrl] = useState("https://gen.pollinations.ai/image/dark%20rainy%20alleyway%20night%20film%20noir%20style%20black%20and%20white%20photography%20high%20contrast%20grainy?width=1024&height=1024&nologo=true&model=flux");
   const [imageLoading, setImageLoading] = useState(false);
   const [currentLocation, setCurrentLocation] = useState("Unknown");
   const [currentTime, setCurrentTime] = useState("00:00");
@@ -35,22 +36,43 @@ function GameContent() {
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [currentObjective, setCurrentObjective] = useState("SOLVE THE MURDER");
   const [caseSummary, setCaseSummary] = useState("Investigation started.");
+  // Store the last visual prompt to allow regenerating images if needed
+  const [lastVisualPrompt, setLastVisualPrompt] = useState("");
 
   const [isTyping, setIsTyping] = useState(false);
   const [gameOver, setGameOver] = useState(false);
   const [showDossier, setShowDossier] = useState(false);
   const [expandedSection, setExpandedSection] = useState<string | null>(null);
   const [caseId, setCaseId] = useState<string | null>(null);
+  const [storyId, setStoryId] = useState<string | null>(null);
+  const [selectionMode, setSelectionMode] = useState<"MAIN" | "STORIES">("MAIN");
 
   const searchParams = useSearchParams();
   const router = useRouter();
 
   useEffect(() => {
+    // Debug API Key loading
+    console.log("Noir Debug: Checking API Key availability...");
+    if (process.env.NEXT_PUBLIC_POLLINATIONS_API_KEY) {
+      console.log("Noir Debug: API Key found (starts with " + process.env.NEXT_PUBLIC_POLLINATIONS_API_KEY.substring(0, 4) + ")");
+    } else {
+      console.warn("Noir Debug: API Key NOT found in process.env");
+    }
+
     const id = searchParams.get("caseId");
     if (id && !started) {
       loadGame(id);
     }
   }, [searchParams]);
+
+  const constructImageUrl = (promptText: string) => {
+    const apiKey = process.env.NEXT_PUBLIC_POLLINATIONS_API_KEY || "";
+    // Clean up prompt: remove old domain artifacts if any, though usually we pass the raw text
+    const encodedPrompt = encodeURIComponent(`${promptText} film noir style, black and white photography, high contrast, grainy`);
+    const seed = Math.floor(Math.random() * 1000000);
+    const baseUrl = "https://gen.pollinations.ai/image";
+    return `${baseUrl}/${encodedPrompt}?width=1024&height=1024&nologo=true&model=flux&seed=${seed}${apiKey ? `&key=${apiKey}` : ""}`;
+  };
 
   const loadGame = async (id: string) => {
     try {
@@ -67,7 +89,22 @@ function GameContent() {
         setCurrentObjective(state.currentObjective || "SOLVE THE MURDER");
         setCaseSummary(state.caseSummary || "Investigation started.");
         setGameOver(state.gameOver || false);
-        setSceneImageUrl(state.sceneImageUrl || "https://image.pollinations.ai/prompt/dark%20rainy%20alleyway%20night%20film%20noir%20style%20black%20and%20white%20photography%20high%20contrast%20grainy?width=1024&height=1024&nologo=true&model=flux");
+        setStoryId(state.storyId || null);
+        setLastVisualPrompt(state.lastVisualPrompt || ""); // Restore prompt
+
+        // AUTO-REPAIR: Check if URL is legacy and fix it
+        let imgUrl = state.sceneImageUrl || "";
+        if (imgUrl.includes("image.pollinations.ai")) {
+          console.log("Noir Debug: Legacy URL detected, upgrading to gen.pollinations.ai");
+          // If we have the last visual prompt saved, use it. usage: state.lastVisualPrompt
+          // If not, try to extract it or just use a default.
+          const promptToUse = state.lastVisualPrompt || "dark noir mystery scene";
+          imgUrl = constructImageUrl(promptToUse);
+        } else if (!imgUrl) {
+          imgUrl = constructImageUrl("dark noir mystery scene");
+        }
+
+        setSceneImageUrl(imgUrl);
         setStarted(true);
       }
     } catch (error) {
@@ -87,7 +124,9 @@ function GameContent() {
       currentObjective: overrideState?.currentObjective || currentObjective,
       caseSummary: overrideState?.caseSummary || caseSummary,
       gameOver: overrideState?.gameOver || gameOver,
-      sceneImageUrl: overrideState?.sceneImageUrl || sceneImageUrl
+      sceneImageUrl: overrideState?.sceneImageUrl || sceneImageUrl,
+      storyId: overrideState?.storyId || storyId,
+      lastVisualPrompt: overrideState?.lastVisualPrompt || lastVisualPrompt
     };
 
     // If we have a caseId, include it in the saved state so the backend knows
@@ -117,7 +156,7 @@ function GameContent() {
     scrollToBottom();
   }, [logs, isTyping]);
 
-  const startGame = async () => {
+  const startGame = async (selectedStoryId?: string) => {
     setStarted(true);
     setIsTyping(true);
     setLogs([]);
@@ -128,9 +167,13 @@ function GameContent() {
     setCurrentObjective("SOLVE THE MURDER");
     setCaseSummary("Investigation started.");
 
+    if (selectedStoryId) {
+      setStoryId(selectedStoryId);
+    }
+
     // Initial call to AI to generate the case
     try {
-      const response = await processGameTurn([], "START_GAME");
+      const response = await processGameTurn([], "START_GAME", selectedStoryId);
 
       const responseId = Date.now().toString();
       const responseText = response.narrative;
@@ -144,9 +187,8 @@ function GameContent() {
 
       if (response.visual_prompt) {
         setImageLoading(true);
-        const prompt = encodeURIComponent(`${response.visual_prompt} film noir style, black and white photography, high contrast, grainy`);
-        const seed = Math.floor(Math.random() * 1000000);
-        const newUrl = `https://image.pollinations.ai/prompt/${prompt}?width=1024&height=1024&nologo=true&model=flux&seed=${seed}`;
+        setLastVisualPrompt(response.visual_prompt);
+        const newUrl = constructImageUrl(response.visual_prompt);
         setSceneImageUrl(newUrl);
         setGallery([newUrl]);
       }
@@ -209,7 +251,7 @@ function GameContent() {
     const history = logs.map(l => `${l.type.toUpperCase()}: ${l.text}`);
 
     try {
-      const response = await processGameTurn(history, userText);
+      const response = await processGameTurn(history, userText, storyId || undefined);
 
       const responseId = (Date.now() + 1).toString();
       const responseText = response.narrative;
@@ -243,10 +285,11 @@ function GameContent() {
 
       // Update Scene Image
       const visualPrompt = response.visual_prompt || "dark noir mystery scene shadows rain";
+      setLastVisualPrompt(response.visual_prompt || ""); // Save for restoration
       setImageLoading(true);
-      const prompt = encodeURIComponent(`${visualPrompt} film noir style, black and white photography, high contrast, grainy`);
-      const seed = Math.floor(Math.random() * 1000000);
-      const newUrl = `https://image.pollinations.ai/prompt/${prompt}?width=1024&height=1024&nologo=true&model=flux&seed=${seed}`;
+
+      const newUrl = constructImageUrl(visualPrompt);
+
       setSceneImageUrl(newUrl);
       setGallery(prev => [newUrl, ...prev]);
 
@@ -311,14 +354,82 @@ function GameContent() {
 
   if (!started) {
     return (
-      <div className="min-h-screen bg-zinc-950 flex items-center justify-center p-4 cursor-pointer" onClick={startGame}>
-        <div className="text-center space-y-6 animate-in fade-in zoom-in duration-1000">
-          <h1 className="text-6xl md:text-9xl font-black text-zinc-100 tracking-tighter flicker" style={{ fontFamily: 'var(--font-special-elite)' }}>
-            NOIR
-          </h1>
-          <p className="text-zinc-500 tracking-[0.5em] text-sm md:text-xl uppercase animate-pulse">
-            Click to Open Case File
-          </p>
+      <div className="min-h-screen bg-zinc-950 flex items-center justify-center p-4">
+        <div className="text-center space-y-12 animate-in fade-in zoom-in duration-1000 max-w-4xl w-full">
+          <div className="space-y-4">
+            <h1 className="text-6xl md:text-9xl font-black text-zinc-100 tracking-tighter flicker" style={{ fontFamily: 'var(--font-special-elite)' }}>
+              NOIR
+            </h1>
+            <p className="text-zinc-500 tracking-[0.5em] text-sm md:text-xl uppercase">
+              Select Investigation Mode
+            </p>
+          </div>
+
+          {selectionMode === "MAIN" ? (
+            <div className="grid md:grid-cols-2 gap-8">
+              <button
+                onClick={() => startGame()}
+                className="group border border-zinc-800 bg-zinc-900/50 p-8 hover:bg-zinc-800 hover:border-zinc-500 transition-all text-left space-y-4 relative overflow-hidden"
+              >
+                <div className="absolute top-0 right-0 p-2 opacity-10 group-hover:opacity-20 transition-opacity">
+                  <RefreshCw className="w-32 h-32" />
+                </div>
+                <h3 className="text-2xl font-bold text-zinc-200">SANDBOX MODE</h3>
+                <p className="text-zinc-500 text-sm leading-relaxed">
+                  Procedurally generated cases. Infinite possibilities. Solve murders in a city that never sleeps.
+                </p>
+                <div className="pt-4 text-xs font-bold text-zinc-400 uppercase tracking-widest group-hover:text-zinc-200">
+                  Launch Simulation &rarr;
+                </div>
+              </button>
+
+              <button
+                onClick={() => setSelectionMode("STORIES")}
+                className="group border border-zinc-800 bg-zinc-900/50 p-8 hover:bg-zinc-800 hover:border-amber-700 transition-all text-left space-y-4 relative overflow-hidden"
+              >
+                <div className="absolute top-0 right-0 p-2 opacity-10 group-hover:opacity-20 transition-opacity">
+                  <FolderOpen className="w-32 h-32" />
+                </div>
+                <h3 className="text-2xl font-bold text-amber-500">STORY MODE</h3>
+                <p className="text-zinc-500 text-sm leading-relaxed">
+                  Curated, fast-paced narratives. Predefined suspects and twists. 15-minute mysteries.
+                </p>
+                <div className="pt-4 text-xs font-bold text-amber-700 uppercase tracking-widest group-hover:text-amber-500">
+                  Select Case File &rarr;
+                </div>
+              </button>
+            </div>
+          ) : (
+            <div className="animate-in slide-in-from-right duration-500">
+              <button
+                onClick={() => setSelectionMode("MAIN")}
+                className="mb-8 text-zinc-500 hover:text-zinc-300 flex items-center gap-2 text-xs uppercase tracking-widest"
+              >
+                &larr; Back to Mode Selection
+              </button>
+
+              <div className="grid md:grid-cols-3 gap-6">
+                {STORIES.map((story) => (
+                  <button
+                    key={story.id}
+                    onClick={() => startGame(story.id)}
+                    className="group border border-zinc-800 bg-zinc-900/30 p-6 hover:bg-zinc-900 hover:border-zinc-500 transition-all text-left flex flex-col h-full relative overflow-hidden"
+                  >
+                    <div className="absolute top-0 left-0 w-full h-1 bg-zinc-800 group-hover:bg-amber-600 transition-colors" />
+
+                    <h3 className="text-xl font-bold text-zinc-200 mb-2 font-serif">{story.title}</h3>
+                    <p className="text-zinc-500 text-sm mb-6 flex-1 text-justify">
+                      {story.description}
+                    </p>
+
+                    <div className="text-center w-full bg-zinc-950 border border-zinc-800 py-2 text-xs font-bold text-zinc-400 uppercase tracking-widest group-hover:text-zinc-200 group-hover:border-zinc-600 transition-all">
+                      Open File
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     );

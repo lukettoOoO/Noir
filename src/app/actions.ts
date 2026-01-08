@@ -2,6 +2,8 @@
 
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
+import { STORIES } from "./stories";
+
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
 
 const SYSTEM_PROMPT = `
@@ -9,7 +11,7 @@ You are the Game Master of a hard-boiled Noir murder mystery.
 
 Your Rules:
 
-1. **Dynamic Case Generation**: At the start of a new game, you MUST generate a unique, random murder mystery.
+1. **Dynamic Case Generation**: At the start of a new game, you MUST generate a unique, random murder mystery UNLESS a specific story is provided.
    - Choose a unique Victim, Location, and 3 distinct Suspects (one is the killer).
    - Do NOT use the same case twice. Invent new names, motives, and settings.
 
@@ -49,18 +51,27 @@ Your Rules:
 Keep the mystery solvable but not obvious. Raise the stakes.
 `;
 
-export async function processGameTurn(history: string[], userInput: string) {
+export async function processGameTurn(history: string[], userInput: string, storyId?: string) {
     try {
         const model = genAI.getGenerativeModel({
             model: "gemini-flash-latest",
             generationConfig: { responseMimeType: "application/json" }
         });
 
+        let finalPrompt = SYSTEM_PROMPT;
+
+        if (storyId) {
+            const story = STORIES.find(s => s.id === storyId);
+            if (story) {
+                finalPrompt += `\n\n${story.systemPromptAddon}`;
+            }
+        }
+
         const chat = model.startChat({
             history: [
                 {
                     role: "user",
-                    parts: [{ text: SYSTEM_PROMPT }],
+                    parts: [{ text: finalPrompt }],
                 },
                 {
                     role: "model",
